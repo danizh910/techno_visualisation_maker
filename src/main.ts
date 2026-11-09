@@ -5,6 +5,7 @@ import { Engine } from './audio/engine';
 import { renderToWav, downloadBlob } from './audio/export';
 import { GENRES, buildPreset } from './presets';
 import { Scene3D } from './viz/scene';
+import type { ClubScene, ClubView } from './viz/club';
 import { NOTE_NAMES, SCALES } from './music';
 import { PATTERN_NAMES, type ScaleName } from './types';
 import { clear, h } from './ui/dom';
@@ -21,9 +22,10 @@ import { mountArrangement } from './ui/arrangement';
 const app = document.getElementById('app')!;
 const topbar = h('header', { class: 'topbar' });
 const sceneEl = h('div', { class: 'scene' });
+const clubEl = h('div', { class: 'scene club hidden' });
 const overlay = h('div', { class: 'scene-overlay' });
 const editor = h('aside', { class: 'side' });
-const stage = h('main', { class: 'stage' }, sceneEl, overlay, editor);
+const stage = h('main', { class: 'stage' }, sceneEl, clubEl, overlay, editor);
 const tabsNav = h('nav', { class: 'tabs' });
 const panes = {
   seq: h('div', { class: 'pane' }),
@@ -58,11 +60,15 @@ const engine = new Engine({
         }
       }
       scene.setPlayStep(step);
+      club?.setPlayStep(step);
       store.emit('playstate');
     }, time);
   },
   onTrigger: (id, vel, note, time) => {
-    draw.schedule(() => scene.trigger(id, vel, note), time);
+    draw.schedule(() => {
+      scene.trigger(id, vel, note);
+      club?.trigger(id, vel);
+    }, time);
   },
 });
 
@@ -87,6 +93,58 @@ scene.analyser = () => (engine.fft ? (engine.fft.getValue() as Float32Array) : n
 
 function syncScene() {
   scene.syncTracks(store.project.tracks, (id) => store.steps(id), (t) => engine.isAudible(t));
+  club?.syncTracks(store.project.tracks, (t) => engine.isAudible(t));
+}
+
+/* ------------------------------------------------------------------ */
+/*  Club-Ansicht (wird erst beim ersten Öffnen geladen)                 */
+/* ------------------------------------------------------------------ */
+
+type ViewMode = 'objects' | 'club';
+const VIEW_KEY = 'tvm-view';
+let viewMode: ViewMode = 'objects';
+let club: ClubScene | null = null;
+let clubLoading: Promise<ClubScene | null> | null = null;
+
+function loadClub(): Promise<ClubScene | null> {
+  if (club) return Promise.resolve(club);
+  clubLoading ??= import('./viz/club')
+    .then((m) => {
+      club = new m.ClubScene(clubEl, {
+        getBpm: () => store.project.bpm,
+        isPlaying: () => store.playing,
+      });
+      club.analyser = scene.analyser;
+      syncScene();
+      return club;
+    })
+    .catch((e) => {
+      console.error(e);
+      alert('Club-Ansicht konnte nicht geladen werden: ' + (e as Error).message);
+      clubLoading = null;
+      return null;
+    });
+  return clubLoading;
+}
+
+async function setViewMode(v: ViewMode) {
+  viewMode = v;
+  try { localStorage.setItem(VIEW_KEY, v); } catch { /* egal */ }
+  if (v === 'club') {
+    renderOverlay();
+    const c = await loadClub();
+    if (!c || viewMode !== 'club') return;
+    scene.setActive(false);
+    sceneEl.classList.add('hidden');
+    clubEl.classList.remove('hidden');
+    c.setActive(true);
+  } else {
+    club?.setActive(false);
+    clubEl.classList.add('hidden');
+    sceneEl.classList.remove('hidden');
+    scene.setActive(true);
+  }
+  renderOverlay();
 }
 
 store.on('project', () => {
@@ -132,6 +190,7 @@ function stop() {
   store.playStep = -1;
   store.playBar = -1;
   scene.setPlayStep(-1);
+  club?.setPlayStep(-1);
   store.emit('playstate');
   renderTopbar();
 }
@@ -258,7 +317,33 @@ store.on('playstate', () => {
 
 function renderOverlay() {
   clear(overlay);
+  const viewSwitch = h('div', { class: 'ov-btns' },
+    h('button', { class: 'chip' + (viewMode === 'objects' ? ' on' : ''), onclick: () => void setViewMode('objects') }, '◉ Objekte'),
+    h('button', { class: 'chip' + (viewMode === 'club' ? ' on' : ''), title: 'Realistischer Club-Raum, gesteuert von deinen Spuren', onclick: () => void setViewMode('club') },
+      club || viewMode !== 'club' ? '▣ Club-Raum' : '▣ Club lädt …'),
+  );
+  if (viewMode === 'club') {
+    const views: [ClubView, string][] = [['floor', 'Tanzfläche'], ['dj', 'DJ-Pult'], ['wide', 'Totale']];
+    overlay.append(
+      viewSwitch,
+      h('div', { class: 'ov-hint' }, 'Ziehen = umsehen · Mausrad = Zoom · Rechtsklick-Ziehen = verschieben · Jede Spur steuert ein Licht'),
+      h('div', { class: 'ov-btns' },
+        views.map(([id, label]) => h('button', { class: 'chip', onclick: () => club?.setView(id) }, '⌖ ' + label)),
+        h('button', {
+          class: 'chip' + (club?.cameraFlight ? ' on' : ''),
+          onclick: () => { if (club) club.cameraFlight = !club.cameraFlight; renderOverlay(); },
+        }, '⟳ Kamerafahrt'),
+        h('button', {
+          class: 'chip' + (club?.strobeEnabled ? ' on' : ''),
+          title: 'Stroboskop-Blitze auf Snare/Clap – Vorsicht bei Lichtempfindlichkeit',
+          onclick: () => { if (club) club.strobeEnabled = !club.strobeEnabled; renderOverlay(); },
+        }, '⚡ Strobo'),
+      ),
+    );
+    return;
+  }
   overlay.append(
+    viewSwitch,
     h('div', { class: 'ov-hint' }, 'Objekte ziehen = im Raum platzieren · Klick = Sound bearbeiten · Ziehen im Leeren = Kamera drehen · Mausrad = Zoom'),
     h('div', { class: 'ov-btns' },
       h('button', {
@@ -404,6 +489,9 @@ renderTopbar();
 renderOverlay();
 syncScene();
 showSplash();
+try {
+  if (localStorage.getItem(VIEW_KEY) === 'club') void setViewMode('club');
+} catch { /* egal */ }
 
 // für Tests / Debugging
-Object.assign(window, { __tvm: { store, engine, scene, Tone } });
+Object.assign(window, { __tvm: { store, engine, scene, Tone, get club() { return club; } } });
