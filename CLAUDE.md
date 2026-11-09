@@ -26,6 +26,7 @@ src/audio/instruments.ts  INSTRUMENTS (Parameter-Schemas = Sound-Design-Maske) +
 src/audio/engine.ts       Engine: Spur-Kanäle, Mixer, Hall/Delay-Busse, Master, Sequencer-Tick, Raum-Mix
 src/audio/export.ts       WAV-Export: eigene Engine in Tone.Offline, 16-bit-WAV-Encoder
 src/viz/scene.ts          Scene3D: Objekte pro Spur, Step-Ring, Spektrum, Laser, Drag&Drop, Auswahl
+src/viz/club.ts           ClubScene: realistischer Club-Raum (lazy geladen, eigener Chunk), Lichter je Spur
 src/ui/*.ts               sequencer, pianoRoll, mixer, soundEditor, arrangement
 src/main.ts               Verdrahtung: Layout, Topbar, Tabs, Tastatur, Start-Bildschirm, Export
 ```
@@ -51,6 +52,15 @@ src/main.ts               Verdrahtung: Layout, Topbar, Tabs, Tastatur, Start-Bil
 3. Voice-Klasse (implements `Voice`: `output`, `set`, `trigger`, `dispose`) + Fall in `createVoice`.
 4. Geometrie in `geometryFor()` (`src/viz/scene.ts`).
 5. Optional Dichte in `randomDrumSteps` (`src/presets.ts`).
+
+### Club-Ansicht (`src/viz/club.ts`)
+- Umschalter „◉ Objekte / ▣ Club-Raum" im Szenen-Overlay; Wahl in localStorage (`tvm-view`).
+- Nur eine Szene rendert gleichzeitig (`setActive`). Club wird per `import()` erst bei Bedarf geladen.
+- Alles prozedural (Canvas-Texturen, keine Assets). Mapping: Kick → Crowd/Membranen/Boden,
+  Snare/Clap → Strobo (nur wenn aktiviert), Hats → Moving-Head-Flackern, Bass/Acid → Laser,
+  Stab/FM → LED-Wand, Pad → Wash-Farben, FX → Spiegelkugel/Dunst. Moving Heads tragen Spurfarben.
+- Performance: nur vordere 6 Moving Heads sind echte SpotLights (2 + Spiegelkugel mit Schatten),
+  Lichtkegel sind additive Shader. Adaptive Auflösung, bei sehr wenig FPS Schatten aus.
 
 ## Konventionen
 - Strikte Typen, keine ungenutzten Variablen (tsc bricht sonst ab).

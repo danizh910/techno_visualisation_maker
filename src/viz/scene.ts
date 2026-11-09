@@ -235,6 +235,12 @@ export class Scene3D {
     this.renderer.setAnimationLoop(() => this.frame());
   }
 
+  /** Render-Loop an/aus (z. B. wenn die Club-Ansicht aktiv ist). */
+  setActive(on: boolean) {
+    this.renderer.setAnimationLoop(on ? () => this.frame() : null);
+    if (on) this.resize();
+  }
+
   set autoRotate(v: boolean) {
     this.controls.autoRotate = v;
   }
