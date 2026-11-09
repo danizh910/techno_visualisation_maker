@@ -112,6 +112,46 @@ export function editingIn(root: HTMLElement): boolean {
   return !!a && root.contains(a) && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA');
 }
 
+const rangeDragging = () => {
+  const a = document.activeElement;
+  return a instanceof HTMLInputElement && a.type === 'range';
+};
+
+/**
+ * Render-Planer: bündelt viele Aufrufe zu einem pro Frame, überspringt unsichtbare Bereiche
+ * (holt sie nach, sobald sie sichtbar werden) und wartet mit `deferWhileDragging`,
+ * bis ein Regler woanders losgelassen wird.
+ */
+export function scheduler(root: HTMLElement, fn: () => void) {
+  let queued = false;
+  let dirty = false;
+  let defer = false;
+  const run = () => {
+    queued = false;
+    if (!root.offsetParent) {
+      dirty = true;
+      return;
+    }
+    if (defer && rangeDragging() && !root.contains(document.activeElement)) {
+      queued = true;
+      window.addEventListener('pointerup', () => requestAnimationFrame(run), { once: true });
+      return;
+    }
+    dirty = defer = false;
+    fn();
+  };
+  new ResizeObserver(() => {
+    if (dirty && root.offsetParent) run();
+  }).observe(root);
+  const schedule = (deferWhileDragging = false) => {
+    defer ||= deferWhileDragging;
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(run);
+  };
+  return schedule;
+}
+
 /** führt fn aus und stellt danach die Scroll-Position von root wieder her */
 export function keepScroll(root: HTMLElement, fn: () => void) {
   const top = root.scrollTop;

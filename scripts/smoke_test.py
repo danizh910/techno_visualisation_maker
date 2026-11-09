@@ -47,7 +47,8 @@ CHECKS = r"""
 errors = []
 with sync_playwright() as pw:
     browser = pw.chromium.launch(args=['--autoplay-policy=no-user-gesture-required'])
-    page = browser.new_page(viewport={'width': 1280, 'height': 800})
+    # Service Worker blockiert: die Headless-Shell hängt sonst beim Klick (App-Test prüft den SW im echten Chrome)
+    page = browser.new_context(viewport={'width': 1280, 'height': 800}, service_workers='block').new_page()
     page.on('console', lambda m: m.type == 'error' and errors.append(m.text))
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.goto(URL)

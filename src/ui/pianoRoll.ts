@@ -3,14 +3,14 @@ import { STEPS } from '../types';
 import { INSTRUMENTS } from '../audio/instruments';
 import { inScale, midiName, rootMidi } from '../music';
 import { trackOctave } from '../audio/engine';
-import { clear, keepScroll, editingIn, h } from './dom';
+import { clear, keepScroll, editingIn, h, scheduler } from './dom';
 
 const ROWS = 25; // zwei Oktaven + 1
 
 export function mountPianoRoll(root: HTMLElement, preview: (id: string, note?: number) => void) {
   let cols: HTMLElement[][] = [];
 
-  const render = () => keepScroll(root, renderRaw);
+  const render = scheduler(root, () => keepScroll(root, renderRaw));
 
   function renderRaw() {
     clear(root);
@@ -107,7 +107,7 @@ export function mountPianoRoll(root: HTMLElement, preview: (id: string, note?: n
     cols.forEach((col, i) => col.forEach((c) => c.classList.toggle('play', i === ps)));
   }
 
-  store.on(['project', 'tracks', 'steps', 'pattern', 'selection', 'transport'], render);
+  store.on(['project', 'tracks', 'steps', 'pattern', 'selection', 'transport'], () => render());
   store.on('track', (id) => {
     if (id === store.selectedTrackId && !editingIn(root)) render();
   });

@@ -6,6 +6,10 @@ Eine Groovebox im Browser für **Berlin Techno, Hard Groove und Bounce**. Jede S
 
 Gebaut für Laptop + Chrome + Kopfhörer. Auf dem Handy kann man die Szene anschauen, produzieren ist dort nicht vorgesehen.
 
+### Als App installieren
+
+In Chrome oder Edge auf **„Als App installieren“** in der Szene klicken (oder auf das Installieren-Symbol in der Adressleiste). TECHNO//VIZ läuft dann im eigenen Fenster, hat einen Startmenü-Eintrag und funktioniert nach dem ersten Start auch **offline**. Projekte und Sounds bleiben lokal auf dem Rechner.
+
 ## Starten
 
 Beim ersten Öffnen ist das Preset **Berlin Rumble** geladen. Leertaste drücken, dann läuft der Beat.
@@ -43,6 +47,7 @@ Voraussetzung: Node ≥ 20.19 (Vite 8).
 
 - **Szenen**: **Halle** (Beton, Nebel, Lichtkegel, weiche Schatten), **Linien** (Wireframes, sehr grafisch) und **Studio** (heller Boden, Galerie-Skulpturen). Fast monochrom mit **einer** Akzentfarbe, die du wählen kannst. Glow ist optional und dezent.
 - **Jedes Instrument hat seine Rolle**: Die Kick bewegt die ganze Szene (Licht- und Kamera-Puls), Hats liefern nur feine Details, der Bass bringt Masse und Gewicht, Pads atmen.
+- **Qualität** (Chip in der Szene): Auf **Auto** misst die App die Bildrate und schaltet bei Ruckeln selbst eine Stufe runter: Hoch, dann Mittel (weniger Pixeldichte, ein Schattenlicht), dann Niedrig (keine Schatten, kein Nebel). Du kannst die Stufe auch fest wählen, die Wahl wird gemerkt.
 - **Bedienung**: Objekt ziehen = Raum-Mix (links/rechts = Panorama, Abstand zur Mitte = Hall), Klick = Sound bearbeiten, im Leeren ziehen = Kamera drehen, Mausrad = Zoom.
 - **Show-Modus** (V): blendet die Oberfläche aus, schaltet auf Vollbild und fährt die Kamera automatisch durch fünf Einstellungen.
 - **Video-Export**: Track und 3D-Show werden Bild für Bild gerendert. Das dauert länger als der Track, ruckelt dafür nie. Ausgabe als **MP4** (H.264/AAC), falls der Browser es nicht kann als **WebM**. Wählbar sind 720p/1080p und 30/60 fps.
@@ -85,6 +90,9 @@ src/
 scripts/
   smoke_test.py         Playwright: Logik, Wiedergabe, Sperren, Loop → Track, WAV
   video_test.py         Playwright (echtes Chrome): Video-Export + Show-Modus
+  app_test.py           Playwright (echtes Chrome): Manifest, Offline-Start, Qualitätsstufen
+public/
+  manifest.webmanifest, sw.js, icon-*.png   App-Installation + Offline-Cache
 ```
 
 Die Tests laufen gegen einen laufenden Server: `npm run build`, dann `npx vite preview --port 4173`, dann `python scripts/smoke_test.py`.

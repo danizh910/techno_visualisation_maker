@@ -13,6 +13,7 @@ const BODY_Y = 1.75;
 const WALL_BARS = 56;
 const LINE_POINTS = 96;
 const BASE_FOV = 45;
+const UP = new THREE.Vector3(0, 1, 0);
 
 /** wie ein Instrument sich bewegt: Kick bewegt den Raum, Hats nur Details, Bass Masse */
 type Role = 'kick' | 'detail' | 'mass' | 'breath' | 'hit';
@@ -279,11 +280,15 @@ export class Scene3D {
   private camPos = new THREE.Vector3();
   /** Sekunden pro Kamera-Einstellung */
   shotLen = 12;
+  /* Qualität: 2 = hoch, 1 = mittel, 0 = niedrig; 'auto' senkt bei zu wenig fps automatisch */
+  quality: 0 | 1 | 2 = 2;
+  qualityMode: 'auto' | 0 | 1 | 2 = 'auto';
+  onQualityChange?: (q: 0 | 1 | 2) => void;
+  private perf = { t: 0, n: 0, warm: 0 };
   analyser: (() => Float32Array | null) | null = null;
 
   constructor(private container: HTMLElement, private cb: SceneCallbacks) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -348,8 +353,51 @@ export class Scene3D {
     this.renderer.setAnimationLoop(() => {
       if (!this.loopRunning) return;
       this.timer.update();
-      this.step(Math.min(0.05, this.timer.getDelta()), this.timer.getElapsed());
+      const raw = this.timer.getDelta();
+      this.measure(raw);
+      this.step(Math.min(0.05, raw), this.timer.getElapsed());
     });
+  }
+
+  /** fps messen; im Auto-Modus nach 2 s unter 48 fps eine Stufe runter (nie automatisch hoch, sonst Flackern) */
+  private measure(raw: number) {
+    const pf = this.perf;
+    if (this.qualityMode !== 'auto' || this.quality === 0 || raw > 0.25 || document.hidden) return;
+    // erste Sekunden ignorieren (Shader kompilieren)
+    if (pf.warm < 3) {
+      pf.warm += raw;
+      return;
+    }
+    pf.t += raw;
+    pf.n++;
+    if (pf.t < 2) return;
+    const fps = pf.n / pf.t;
+    pf.t = pf.n = 0;
+    if (fps < 48) this.applyQuality((this.quality - 1) as 0 | 1);
+  }
+
+  /** Qualität fest setzen oder 'auto' (startet wieder bei hoch) */
+  setQualityMode(mode: 'auto' | 0 | 1 | 2) {
+    this.qualityMode = mode;
+    this.perf = { t: 0, n: 0, warm: 0 };
+    this.applyQuality(mode === 'auto' ? 2 : mode);
+  }
+
+  private applyQuality(q: 0 | 1 | 2) {
+    this.quality = q;
+    // Schatten-Lichter: hoch 2, mittel 1, niedrig keine (three kompiliert die Shader selbst neu)
+    this.spots.forEach((s, i) => (s.light.castShadow = i < [0, 1, 2][q]));
+    this.studioKey.castShadow = q > 0;
+    this.haze.visible = q > 0;
+    this.perf = { t: 0, n: 0, warm: 1 };
+    this.resize();
+    this.onQualityChange?.(q);
+  }
+
+  /** Pixeldichte je Qualität (hochauflösende Displays kosten sonst das Vierfache) */
+  private get dpr() {
+    const d = window.devicePixelRatio || 1;
+    return [Math.min(d, 0.75), Math.min(d, 1), Math.min(d, 1.5)][this.quality];
   }
 
   /* ---------------- Umgebungen ---------------- */
@@ -409,7 +457,7 @@ export class Scene3D {
       const color = accent ? this.accent : new THREE.Color(0xfff1e0);
       const light = new THREE.SpotLight(color, 120, 0, 0.3, 0.75, 1);
       light.position.set(x, y, z);
-      light.castShadow = i < 3;
+      light.castShadow = i < 2;
       light.shadow.mapSize.set(1024, 1024);
       light.shadow.bias = -0.0005;
       light.shadow.radius = 6;
@@ -421,7 +469,7 @@ export class Scene3D {
     });
 
     // Dunst
-    const n = 260;
+    const n = 130;
     const pos = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
       pos[i * 3] = (Math.random() - 0.5) * 50;
@@ -432,7 +480,7 @@ export class Scene3D {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     this.haze = new THREE.Points(
       geo,
-      new THREE.PointsMaterial({ size: 9, map: softDot(), color: 0x8a8a92, transparent: true, opacity: 0.045, depthWrite: false, sizeAttenuation: true }),
+      new THREE.PointsMaterial({ size: 11, map: softDot(), color: 0x8a8a92, transparent: true, opacity: 0.06, depthWrite: false, sizeAttenuation: true }),
     );
     env.add(this.haze);
 
@@ -611,7 +659,7 @@ export class Scene3D {
   }
 
   /** Render-Auflösung setzen (Video-Export nutzt feste Größe) */
-  setRenderSize(w: number, h: number, pixelRatio = Math.min(window.devicePixelRatio, 2)) {
+  setRenderSize(w: number, h: number, pixelRatio = this.dpr) {
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(w, h, false);
     this.composer.setPixelRatio(pixelRatio);
@@ -909,7 +957,9 @@ export class Scene3D {
     // Kick bewegt die ganze Szene: kurzer Zoom-Punch
     this.camera.fov = BASE_FOV - this.pulse * 1.1 - this.weight * 0.3;
     this.camera.updateProjectionMatrix();
-    this.composer.render();
+    // ohne Glow direkt auf die Leinwand: spart einen Vollbild-Pass und nutzt echtes Antialiasing
+    if (this.bloomPass.enabled) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
   }
 
   private updateSpectrum(fft: Float32Array | null | undefined, dt: number) {
@@ -931,7 +981,7 @@ export class Scene3D {
   }
 
   private stepHalle(dt: number, t: number) {
-    const up = new THREE.Vector3(0, 1, 0);
+    const up = UP;
     for (const s of this.spots) {
       // langsames Schwenken, Kick schlägt aufs Licht
       const tx = s.base.x + Math.sin(t * 0.23 + s.phase) * 3.5;
@@ -950,7 +1000,7 @@ export class Scene3D {
     }
     // Dunst driftet, Hats lassen ihn kaum merklich funkeln
     this.haze.rotation.y += dt * 0.01;
-    (this.haze.material as THREE.PointsMaterial).opacity = 0.04 + this.pulse * 0.025 + this.sparkle * 0.01;
+    (this.haze.material as THREE.PointsMaterial).opacity = 0.055 + this.pulse * 0.03 + this.sparkle * 0.01;
     for (let i = 0; i < WALL_BARS; i++) {
       const lv = this.specLevels[i];
       this.dummy.position.set((i - (WALL_BARS - 1) / 2) * 0.62, 3.2, -26.85);

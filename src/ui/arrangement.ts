@@ -1,6 +1,6 @@
 import { store } from '../store';
 import { PATTERN_NAMES, STEPS } from '../types';
-import { clear, keepScroll, h, icon } from './dom';
+import { clear, keepScroll, h, icon, scheduler } from './dom';
 
 /** Graustufen statt Neon: Pattern unterscheiden sich über Helligkeit */
 const PATTERN_SHADE = [0.82, 0.62, 0.92, 0.42, 0.55, 1, 0.72, 0.35];
@@ -17,7 +17,7 @@ function patternDensity(i: number): number {
 export function mountArrangement(root: HTMLElement, actions: { onExport: () => void; loopToTrack: () => void }) {
   let blocks: HTMLElement[] = [];
 
-  const render = () => keepScroll(root, renderRaw);
+  const render = scheduler(root, () => keepScroll(root, renderRaw));
 
   function renderRaw() {
     clear(root);
@@ -101,7 +101,7 @@ export function mountArrangement(root: HTMLElement, actions: { onExport: () => v
     blocks.forEach((b, i) => b.classList.toggle('play', i === bar));
   }
 
-  store.on(['project', 'song', 'steps', 'transport'], render);
+  store.on(['project', 'song', 'steps', 'transport'], () => render());
   store.on('playstate', highlight);
   render();
 }

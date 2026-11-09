@@ -1,6 +1,6 @@
 import { store } from '../store';
 import { spatial } from '../audio/engine';
-import { clear, keepScroll, editingIn, fmt, h, slider } from './dom';
+import { clear, keepScroll, editingIn, fmt, h, slider, scheduler } from './dom';
 
 function vfader(value: number, min: number, max: number, step: number, onInput: (v: number) => void, unit = 'dB') {
   const out = h('span', { class: 'val' }, fmt(value, unit));
@@ -15,7 +15,9 @@ function vfader(value: number, min: number, max: number, step: number, onInput: 
 }
 
 export function mountMixer(root: HTMLElement) {
-  const render = () => keepScroll(root, renderRaw);
+  const render = scheduler(root, () => {
+    if (!editingIn(root)) keepScroll(root, renderRaw);
+  });
 
   function renderRaw() {
     clear(root);
@@ -72,12 +74,7 @@ export function mountMixer(root: HTMLElement) {
     root.append(strips);
   }
 
-  store.on(['project', 'tracks', 'selection', 'position'], () => {
-    if (!editingIn(root)) render();
-  });
-  store.on('track', () => {
-    if (!editingIn(root)) render();
-  });
-  store.on('transport', render);
+  store.on(['project', 'tracks', 'selection', 'position', 'transport'], () => render());
+  store.on('track', () => render(true));
   render();
 }

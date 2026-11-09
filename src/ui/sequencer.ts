@@ -3,7 +3,7 @@ import { STEPS, emptySteps, type Step, type StyleName } from '../types';
 import { INSTRUMENTS, INSTRUMENT_ORDER } from '../audio/instruments';
 import { SCALES } from '../music';
 import { STYLES, STYLE_ORDER, generate, mutate } from '../groove';
-import { clear, keepScroll, h, icon } from './dom';
+import { clear, keepScroll, h, icon, scheduler } from './dom';
 
 let clipboard: Record<string, Step[]> | null = null;
 type Pen = 'on' | 'vel' | 'prob';
@@ -37,7 +37,7 @@ export function mountSequencer(root: HTMLElement, actions: SequencerActions) {
   let cells: HTMLElement[][] = [];
   let headCells: HTMLElement[] = [];
 
-  const render = () => keepScroll(root, renderRaw);
+  const render = scheduler(root, () => keepScroll(root, renderRaw));
 
   function renderRaw() {
     clear(root);
@@ -214,7 +214,9 @@ export function mountSequencer(root: HTMLElement, actions: SequencerActions) {
     for (const row of cells) row.forEach((c, i) => c.classList.toggle('play', i === ps));
   }
 
-  store.on(['project', 'tracks', 'steps', 'pattern', 'selection', 'track', 'transport'], render);
+  store.on(['project', 'tracks', 'steps', 'pattern', 'selection', 'transport'], () => render());
+  // Klang-Regler im Seitenpanel: erst nach dem Loslassen neu aufbauen
+  store.on('track', () => render(true));
   store.on('playstate', highlight);
   render();
 }

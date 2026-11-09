@@ -39,6 +39,8 @@ app.append(topbar, stage, dock);
 /*  Audio + 3D                                                         */
 /* ------------------------------------------------------------------ */
 
+// mehr Vorlauf: der Ton bleibt stabil, auch wenn die Grafik mal einen Frame länger braucht
+Tone.setContext(new Tone.Context({ latencyHint: 'balanced', lookAhead: 0.15 }));
 const draw = Tone.getDraw();
 const songIndex = (bar: number) => bar % store.project.song.length;
 
@@ -80,6 +82,46 @@ const scene = new Scene3D(sceneEl, {
   onMove: (id, x, z) => moveTrack(id, x, z),
 });
 scene.analyser = () => (engine.fft ? (engine.fft.getValue() as Float32Array) : null);
+
+/* Grafik-Qualität: Auto senkt bei Ruckeln selbst, Wahl wird gemerkt */
+type QualityMode = 'auto' | 0 | 1 | 2;
+const QUALITY_KEY = 'tvm-quality';
+const QUALITY_LABEL = ['Niedrig', 'Mittel', 'Hoch'];
+const QUALITY_CYCLE: QualityMode[] = ['auto', 2, 1, 0];
+function loadQuality(): QualityMode {
+  try {
+    const v = localStorage.getItem(QUALITY_KEY);
+    return v === null || v === 'auto' ? 'auto' : (Math.max(0, Math.min(2, Number(v))) as 0 | 1 | 2);
+  } catch {
+    return 'auto';
+  }
+}
+scene.setQualityMode(loadQuality());
+scene.onQualityChange = () => renderOverlay();
+function cycleQuality() {
+  const next = QUALITY_CYCLE[(QUALITY_CYCLE.indexOf(scene.qualityMode) + 1) % QUALITY_CYCLE.length];
+  scene.setQualityMode(next);
+  try {
+    localStorage.setItem(QUALITY_KEY, String(next));
+  } catch {
+    /* egal */
+  }
+}
+
+/* Als App installieren (Chrome/Edge) */
+let installPrompt: (Event & { prompt: () => Promise<void> }) | null = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e as typeof installPrompt;
+  renderOverlay();
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  renderOverlay();
+});
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  void navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
 
 function moveTrack(id: string, x: number, z: number) {
   const t = store.track(id);
@@ -315,10 +357,22 @@ function renderOverlay() {
           renderOverlay();
         },
       }, 'Raum-Mix'),
+      h('button', {
+        class: 'chip',
+        title: 'Grafik-Qualität – bei Ruckeln runterschalten. Auto senkt selbst, wenn die Bildrate einbricht.',
+        onclick: cycleQuality,
+      }, `Qualität: ${scene.qualityMode === 'auto' ? `Auto (${QUALITY_LABEL[scene.quality]})` : QUALITY_LABEL[scene.qualityMode]}`),
       h('button', { class: 'chip' + (scene.bloom ? ' on' : ''), title: 'Dezenter Glow (kostet Leistung)', onclick: () => { scene.bloom = !scene.bloom; renderOverlay(); } }, 'Glow'),
       h('button', { class: 'chip' + (scene.autoRotate ? ' on' : ''), title: 'Langsame Kamerafahrt', onclick: () => { scene.autoRotate = !scene.autoRotate; renderOverlay(); } }, 'Kamerafahrt'),
       h('button', { class: 'chip', title: 'Kamera zurücksetzen', onclick: () => scene.resetCamera() }, 'Kamera zurück'),
       h('button', { class: 'chip', title: 'Vollbild-Show ohne Oberfläche (Taste V)', onclick: () => setVJ(true) }, 'Show'),
+      installPrompt
+        ? h('button', {
+          class: 'chip on',
+          title: 'Als eigenes Programm installieren – eigenes Fenster, Startmenü, läuft auch offline',
+          onclick: () => void installPrompt?.prompt(),
+        }, 'Als App installieren')
+        : null,
       h('button', { class: 'chip icon-chip', title: 'Tipps anzeigen', onclick: () => showTips(true) }, icon('help')),
     ),
     h('div', { class: 'ov-hint' }, 'Objekt ziehen = im Raum mischen · Klick = Sound · Ziehen im Leeren = Kamera · Mausrad = Zoom'),
