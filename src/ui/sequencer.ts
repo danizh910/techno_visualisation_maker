@@ -1,13 +1,39 @@
 import { store } from '../store';
-import { STEPS, emptySteps, type Step } from '../types';
+import { STEPS, emptySteps, type Step, type StyleName } from '../types';
 import { INSTRUMENTS, INSTRUMENT_ORDER } from '../audio/instruments';
 import { SCALES } from '../music';
-import { randomDrumSteps, randomMelodicSteps } from '../presets';
-import { clear, keepScroll, h } from './dom';
+import { STYLES, STYLE_ORDER, generate, mutate } from '../groove';
+import { clear, keepScroll, h, icon } from './dom';
 
 let clipboard: Record<string, Step[]> | null = null;
+type Pen = 'on' | 'vel' | 'prob';
+let pen: Pen = 'on';
+let strength = 0.35;
 
-export function mountSequencer(root: HTMLElement, preview: (id: string, note?: number) => void) {
+const VEL_CYCLE = (v: number) => (v > 0.9 ? 0.65 : v > 0.5 ? 0.38 : 1);
+const PROB_CYCLE = (p: number) => (p > 0.9 ? 0.75 : p > 0.6 ? 0.5 : p > 0.3 ? 0.25 : 1);
+
+export interface SequencerActions {
+  preview: (id: string, note?: number) => void;
+  loopToTrack: () => void;
+}
+
+/** Würfeln bzw. Mutieren für alle ungesperrten Spuren (oder eine einzelne) */
+export function rollTracks(kind: 'dice' | 'mutate', onlyId?: string) {
+  const p = store.project;
+  const pat = p.patterns[store.currentPattern];
+  const scale = SCALES[p.scale].steps;
+  for (const t of p.tracks) {
+    if (onlyId ? t.id !== onlyId : t.locked) continue;
+    pat.steps[t.id] = kind === 'dice'
+      ? generate(p.style, t.type, scale)
+      : mutate(store.steps(t.id), p.style, t.type, scale, strength);
+  }
+  store.emit('steps');
+}
+
+export function mountSequencer(root: HTMLElement, actions: SequencerActions) {
+  const { preview } = actions;
   let cells: HTMLElement[][] = [];
   let headCells: HTMLElement[] = [];
 
@@ -23,51 +49,75 @@ export function mountSequencer(root: HTMLElement, preview: (id: string, note?: n
       'select',
       {
         class: 'add-instrument',
+        title: 'Instrument hinzufügen',
         onchange: (e: Event) => {
           const sel = e.target as HTMLSelectElement;
           if (sel.value) store.addTrack(sel.value as never);
           sel.value = '';
         },
       },
-      h('option', { value: '' }, '+ Instrument hinzufügen'),
+      h('option', { value: '' }, '+ Instrument'),
       INSTRUMENT_ORDER.map((t) => h('option', { value: t }, `${INSTRUMENTS[t].label} – ${INSTRUMENTS[t].description}`)),
     );
 
-    const toolbar = h(
-      'div',
-      { class: 'seq-toolbar' },
-      addSel,
-      h('div', { class: 'spacer' }),
-      h('span', { class: 'hint' }, 'Klick = an/aus · Rechtsklick = Lautstärke · Name = Sound bearbeiten'),
-      h('button', {
-        class: 'btn small',
-        title: 'Aktuelles Pattern kopieren',
-        onclick: () => {
-          clipboard = JSON.parse(JSON.stringify(p.patterns[store.currentPattern].steps));
-        },
-      }, 'Kopieren'),
-      h('button', {
-        class: 'btn small',
-        title: 'In aktuelles Pattern einfügen',
-        onclick: () => {
-          if (!clipboard) return;
-          p.patterns[store.currentPattern].steps = JSON.parse(JSON.stringify(clipboard));
-          store.emit('steps');
-        },
-      }, 'Einfügen'),
-      h('button', {
-        class: 'btn small',
-        title: 'Aktuelles Pattern leeren',
-        onclick: () => {
-          p.patterns[store.currentPattern].steps = {};
-          store.emit('steps');
-        },
-      }, 'Leeren'),
+    const styleSel = h('select', {
+      class: 'style-sel',
+      title: 'Stil-Regeln für Würfeln und Mutieren',
+      onchange: (e: Event) => {
+        p.style = (e.target as HTMLSelectElement).value as StyleName;
+        store.emit('transport');
+      },
+    }, STYLE_ORDER.map((s) => h('option', { value: s, selected: s === p.style }, STYLES[s].label)));
+
+    const strengthIn = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: String(strength), title: 'Mutations-Stärke: wenig ↔ viel' });
+    strengthIn.addEventListener('input', () => (strength = parseFloat(strengthIn.value)));
+    strengthIn.addEventListener('change', () => strengthIn.blur());
+
+    const penBtn = (id: Pen, label: string, title: string) =>
+      h('button', { class: 'seg' + (pen === id ? ' on' : ''), title, onclick: () => { pen = id; render(); } }, label);
+
+    root.append(
+      h('div', { class: 'seq-toolbar' },
+        addSel,
+        h('span', { class: 'tb-sep' }),
+        h('label', { class: 'mini' }, 'Stil', styleSel),
+        h('button', { class: 'btn small', 'data-hint': 'dice', title: 'Alle ungesperrten Spuren neu würfeln – folgt den Regeln des Stils', onclick: () => rollTracks('dice') }, icon('dice'), 'Würfeln'),
+        h('button', { class: 'btn small', title: 'Aktuelles Pattern leicht variieren (Stärke rechts)', onclick: () => rollTracks('mutate') }, icon('mutate'), 'Mutieren'),
+        h('label', { class: 'mini strength' }, strengthIn),
+        h('button', { class: 'btn small accent', 'data-hint': 'song', title: 'Aus diesem Loop eine komplette Song-Struktur bauen (überschreibt Patterns A–H)', onclick: actions.loopToTrack }, icon('song'), 'Loop → Track'),
+        h('div', { class: 'spacer' }),
+        h('div', { class: 'segs', title: 'Was ein Klick auf einen Step macht' },
+          penBtn('on', 'An/Aus', 'Klick schaltet Steps an/aus'),
+          penBtn('vel', 'Lautstärke', 'Klick wechselt 100 / 65 / 38 % (auch: Rechtsklick)'),
+          penBtn('prob', 'Chance', 'Klick wechselt 100 / 75 / 50 / 25 % Wahrscheinlichkeit (auch: Shift+Klick)'),
+        ),
+        h('button', {
+          class: 'btn small ghost',
+          title: 'Aktuelles Pattern kopieren',
+          onclick: () => (clipboard = JSON.parse(JSON.stringify(p.patterns[store.currentPattern].steps))),
+        }, 'Kopieren'),
+        h('button', {
+          class: 'btn small ghost',
+          title: 'In aktuelles Pattern einfügen',
+          onclick: () => {
+            if (!clipboard) return;
+            p.patterns[store.currentPattern].steps = JSON.parse(JSON.stringify(clipboard));
+            store.emit('steps');
+          },
+        }, 'Einfügen'),
+        h('button', {
+          class: 'btn small ghost',
+          title: 'Aktuelles Pattern leeren (gesperrte Spuren bleiben)',
+          onclick: () => {
+            const pat = p.patterns[store.currentPattern];
+            for (const t of p.tracks) if (!t.locked) pat.steps[t.id] = emptySteps();
+            store.emit('steps');
+          },
+        }, 'Leeren'),
+      ),
     );
-    root.append(toolbar);
 
     const grid = h('div', { class: 'seq-grid' });
-    // Kopfzeile mit Step-Nummern
     const head = h('div', { class: 'seq-row head' }, h('div', { class: 'seq-name' }, ''), h('div', { class: 'seq-ms' }));
     const headSteps = h('div', { class: 'seq-steps' });
     for (let i = 0; i < STEPS; i++) {
@@ -86,7 +136,7 @@ export function mountSequencer(root: HTMLElement, preview: (id: string, note?: n
       const def = INSTRUMENTS[t.type];
       const steps = store.steps(t.id);
       const row = h('div', {
-        class: 'seq-row' + (store.selectedTrackId === t.id ? ' selected' : ''),
+        class: 'seq-row' + (store.selectedTrackId === t.id ? ' selected' : '') + (t.locked ? ' locked' : ''),
         style: `--c:${t.color}`,
       });
       const nameBtn = h(
@@ -99,60 +149,49 @@ export function mountSequencer(root: HTMLElement, preview: (id: string, note?: n
       const ms = h(
         'div',
         { class: 'seq-ms' },
+        h('button', { class: 'tog' + (t.mute ? ' on mute' : ''), title: 'Stumm', onclick: () => store.updateTrack(t.id, { mute: !t.mute }) }, 'M'),
+        h('button', { class: 'tog' + (t.solo ? ' on solo' : ''), title: 'Solo', onclick: () => store.updateTrack(t.id, { solo: !t.solo }) }, 'S'),
         h('button', {
-          class: 'tog' + (t.mute ? ' on mute' : ''),
-          title: 'Stumm',
-          onclick: () => store.updateTrack(t.id, { mute: !t.mute }),
-        }, 'M'),
-        h('button', {
-          class: 'tog' + (t.solo ? ' on solo' : ''),
-          title: 'Solo',
-          onclick: () => store.updateTrack(t.id, { solo: !t.solo }),
-        }, 'S'),
+          class: 'tog lock' + (t.locked ? ' on' : ''),
+          'data-hint': t === p.tracks[0] ? 'lock' : null,
+          title: t.locked ? 'Gesperrt – Würfeln/Mutieren lassen diese Spur in Ruhe' : 'Sperren: beim Würfeln/Mutieren unangetastet',
+          onclick: () => store.updateTrack(t.id, { locked: !t.locked }),
+        }, icon(t.locked ? 'lock' : 'unlock')),
       );
       const stepWrap = h('div', { class: 'seq-steps' });
       const rowCells: HTMLElement[] = [];
       steps.forEach((s, i) => {
         const c = h('button', {
-          class: 'step' + (i % 4 === 0 ? ' beat' : '') + (s.on ? ' on' : '') + (s.accent ? ' accent' : ''),
+          class: 'step' + (i % 4 === 0 ? ' beat' : '') + (s.on ? ' on' : '') + (s.accent ? ' accent' : '') + (s.on && s.prob < 1 ? ' chance' : ''),
           style: s.on ? `--v:${s.vel}` : '',
-          title: def.melodic && s.on ? `Note +${s.note}` : '',
+          title: s.on ? `${def.melodic ? `Note +${s.note} · ` : ''}${Math.round(s.vel * 100)} %${s.prob < 1 ? ` · Chance ${Math.round(s.prob * 100)} %` : ''}` : '',
         });
-        if (def.melodic && s.on) c.textContent = String(s.note);
-        c.addEventListener('click', () => {
-          s.on = !s.on;
-          if (s.on) {
-            s.vel = s.vel || 1;
-            if (store.selectedTrackId === t.id) preview(t.id, s.note);
-          }
+        if (s.on && s.prob < 1) c.append(h('span', { class: 'pct' }, String(Math.round(s.prob * 100))));
+        else if (def.melodic && s.on) c.textContent = String(s.note);
+        c.addEventListener('click', (e) => {
+          const mode: Pen = e.shiftKey ? 'prob' : pen;
+          if (mode === 'on' || !s.on) {
+            if (mode === 'on') s.on = !s.on;
+            else s.on = true;
+            if (s.on && mode === 'on' && store.selectedTrackId === t.id) preview(t.id, s.note);
+          } else if (mode === 'vel') s.vel = VEL_CYCLE(s.vel);
+          else s.prob = PROB_CYCLE(s.prob);
           store.emit('steps');
         });
         c.addEventListener('contextmenu', (e) => {
           e.preventDefault();
-          if (!s.on) {
-            s.on = true;
-            s.vel = 1;
-          } else s.vel = s.vel > 0.9 ? 0.65 : s.vel > 0.5 ? 0.35 : 1;
+          if (!s.on) Object.assign(s, { on: true, vel: 1 });
+          else s.vel = VEL_CYCLE(s.vel);
           store.emit('steps');
         });
         rowCells.push(c);
         stepWrap.append(c);
       });
       cells.push(rowCells);
-      const actions = h(
+      const actionsEl = h(
         'div',
         { class: 'seq-actions' },
-        h('button', {
-          class: 'icon',
-          title: 'Zufälliges Pattern',
-          onclick: () => {
-            const pat = p.patterns[store.currentPattern];
-            pat.steps[t.id] = def.melodic
-              ? randomMelodicSteps(SCALES[p.scale].steps, t.type === 'pad' ? 0.1 : t.type === 'acid' ? 0.7 : 0.4)
-              : randomDrumSteps(t.type);
-            store.emit('steps');
-          },
-        }, '🎲'),
+        h('button', { class: 'icon', title: 'Nur diese Spur neu würfeln', onclick: () => rollTracks('dice', t.id) }, icon('dice')),
         h('button', {
           class: 'icon',
           title: 'Spur leeren',
@@ -160,9 +199,9 @@ export function mountSequencer(root: HTMLElement, preview: (id: string, note?: n
             p.patterns[store.currentPattern].steps[t.id] = emptySteps();
             store.emit('steps');
           },
-        }, '⌫'),
+        }, icon('clear')),
       );
-      row.append(nameBtn, ms, stepWrap, actions);
+      row.append(nameBtn, ms, stepWrap, actionsEl);
       grid.append(row);
     }
     root.append(grid);

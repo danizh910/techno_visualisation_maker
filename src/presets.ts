@@ -1,40 +1,11 @@
-import type { InstrumentType, Project, ScaleName, Step, Track } from './types';
-import { STEPS, emptySteps } from './types';
+import type { InstrumentType, Project, ScaleName, StyleName, Track } from './types';
 import { createTrack, emptyProject } from './store';
+import { STYLES, drum, mel } from './groove';
 
-/* Kurzschreibweise für Patterns
- * Drums:     "x...o..." – x = voll, o = leise, . = aus (Leerzeichen werden ignoriert)
- * Melodisch: "0 . 3! 7~ ." – Zahl = Halbton über Grundton, ! = Akzent, ~ = Slide, ? = leise
+/* Kurzschreibweise für Patterns (siehe groove.ts)
+ * Drums:     "x...o...g...?..." – x = voll, o = mittel, g = Ghost, ? = 50 % Chance, . = aus
+ * Melodisch: "0 . 3! 7~ ." – Zahl = Halbton über Grundton, ! = Akzent, ~ = Slide, ? = leise, % = 50 % Chance
  */
-function drum(s: string): Step[] {
-  const chars = s.replace(/\s+/g, '').split('');
-  const out = emptySteps();
-  chars.slice(0, STEPS).forEach((c, i) => {
-    if (c === 'x' || c === 'o') {
-      out[i].on = true;
-      out[i].vel = c === 'x' ? 1 : 0.6;
-    }
-  });
-  return out;
-}
-
-function mel(s: string): Step[] {
-  const tokens = s.trim().split(/\s+/);
-  const out = emptySteps();
-  tokens.slice(0, STEPS).forEach((tok, i) => {
-    if (tok === '.' || tok === '-') return;
-    const n = parseInt(tok, 10);
-    if (Number.isNaN(n)) return;
-    out[i] = {
-      on: true,
-      note: n,
-      vel: tok.includes('?') ? 0.6 : 1,
-      accent: tok.includes('!'),
-      slide: tok.includes('~'),
-    };
-  });
-  return out;
-}
 
 interface PresetTrack {
   type: InstrumentType;
@@ -50,7 +21,9 @@ export interface GenrePreset {
   id: string;
   name: string;
   bpm: number;
+  /** alter globaler Swing → wird auf alle Spuren außer Kick verteilt */
   swing?: number;
+  style: StyleName;
   key: number;
   scale: ScaleName;
   song: string;
@@ -60,10 +33,78 @@ export interface GenrePreset {
 }
 
 const K4 = 'x...x...x...x...';
+const OFF = '..x...x...x...x.';
 
 export const GENRES: GenrePreset[] = [
   {
+    id: 'berlin',
+    name: 'Berlin Rumble',
+    style: 'berlin',
+    bpm: 132,
+    key: 5,
+    scale: 'minor',
+    song: 'AABBCCDC',
+    description: 'Dunkle Halle: Rumble-Kick, Dub-Stab im Delay, pumpender Drone.',
+    master: { reverbDecay: 5, delayTime: '8n.', delayFeedback: 0.45, compThreshold: -16 },
+    tracks: [
+      { type: 'kick', pos: [0, 1], params: { tune: 45, decay: 0.42, drive: 0.25, click: 0.22, rumble: 0.65, rumbleTone: 140, rumbleDecay: 0.88 }, p: { A: K4, B: K4, C: K4, D: 'x...x...x...x..g' }, mix: { volume: -3 } },
+      { type: 'hat', pos: [4, -2], params: { decay: 0.035, tone: 9000, metal: 0.35 }, p: { A: 'g.x.g.x.g.x.g.x.', B: 'g?xgg?xgg?xgg?xg', C: 'g?xgg?xgg?xgg?xg', D: 'ggxgggxgggxgggxx' }, mix: { volume: -15 } },
+      { type: 'openhat', pos: [6, 1], params: { decay: 0.22, tone: 7500 }, p: { B: OFF, C: OFF, D: OFF }, mix: { volume: -15 } },
+      { type: 'ride', pos: [-4, 3], p: { C: '..o...o...o...o.', D: 'g.o.g.o.g.o.g.o.' }, mix: { volume: -19 } },
+      { type: 'clap', pos: [-3, -2], params: { tone: 1100, decay: 0.35, q: 1.6 }, p: { C: '............x...', D: '....x.......x...' }, mix: { volume: -12, reverb: 0.4 } },
+      { type: 'perc', name: 'Tom', pos: [5, -6], params: { decay: 0.25, octaves: 1.2, pitchDecay: 0.04, wave: 'sine', octave: 3 }, p: { B: '. . 0 . . . . . 7 . . . . 0 . .', C: '. 0 . . . 7 . . 0 . . 12% . . 5 .', D: '. 0 . . . 7 . . 0 . . 12 . . 5 .' }, mix: { volume: -14, delay: 0.3, reverb: 0.25 } },
+      { type: 'stab', name: 'Dub Stab', pos: [-5, -6], params: { chord: 'minor7', cutoff: 750, res: 2.5, decay: 0.22, octave: 3 }, p: { B: '. . . . . . 0 . . . . . . . . .', C: '. . . 0 . . . . . . . 0 . . . .', D: '. . . 0 . . 0 . . . . 0 . . . .' }, mix: { volume: -14, delay: 0.55, reverb: 0.4, sidechain: 0.5 } },
+      { type: 'pad', name: 'Drone', pos: [-7, -8], params: { chord: 'fifth', cutoff: 500, attack: 2, release: 4, gate: 16, octave: 2 }, p: { A: '0', B: '0', C: '0', D: '0' }, mix: { volume: -18, reverb: 0.5, sidechain: 0.7 } },
+      { type: 'fx', pos: [8, -5], params: { mode: 'riser', length: 16 }, p: { D: 'x...............' }, mix: { volume: -18, reverb: 0.4 } },
+    ],
+  },
+  {
+    id: 'hardgroove',
+    name: 'Hard Groove',
+    style: 'hardgroove',
+    bpm: 145,
+    key: 2,
+    scale: 'minor',
+    song: 'AABBCCDC',
+    description: 'Geshuffelte Hats, 16tel-Ride, geloopte Toms und Congas.',
+    master: { reverbDecay: 3, delayTime: '8n', delayFeedback: 0.3 },
+    tracks: [
+      { type: 'kick', pos: [0, 1], params: { tune: 52, decay: 0.3, drive: 0.35, click: 0.4, octaves: 5 }, p: { A: K4, B: K4, C: K4, D: 'x...x...x...x..g' }, mix: { volume: -3 } },
+      { type: 'ride', pos: [5, -1], params: { decay: 0.7, tone: 7000, bell: 0.45, wash: 0.25 }, p: { A: 'goxogoxogoxogoxo', B: 'goxogoxogoxogoxo', C: 'goxogoxogoxogoxo', D: 'goxogoxogoxogoxx' }, mix: { volume: -17 } },
+      { type: 'hat', pos: [3, -4], params: { decay: 0.03, tone: 9500, metal: 0.4 }, p: { A: 'x.xox.xox.xox.xo', B: 'x.xox.xox.xox.xo', C: 'xgxox?xoxgxox?xo', D: 'x.xxx.xxx.xxx.xx' }, mix: { volume: -15 } },
+      { type: 'openhat', pos: [7, 2], params: { decay: 0.25 }, p: { B: OFF, C: OFF, D: OFF }, mix: { volume: -16 } },
+      { type: 'clap', pos: [-3, -2], params: { tone: 1400, decay: 0.22 }, p: { B: '....x.......x...', C: '....x..g....x...', D: '....x..g....x.gg' }, mix: { volume: -10, reverb: 0.25 } },
+      { type: 'perc', name: 'Toms', pos: [-5, -5], params: { decay: 0.22, octaves: 1.6, pitchDecay: 0.03, wave: 'sine', octave: 3 }, p: { B: '0 . . 7 . . 12 . 0 . . 7 . . 5 .', C: '0 . . 7 . . 12 . 0 . . 7 . . 5 .', D: '0 . . 7 . . 12 . 0 . 7 . 12 . 5 3' }, mix: { volume: -12, delay: 0.1 } },
+      { type: 'perc', name: 'Conga', pos: [6, -6], params: { decay: 0.08, octaves: 0.6, pitchDecay: 0.01, wave: 'triangle', octave: 4 }, p: { A: '7 . . 12 . . . 7% . . 12 . . 7 . .', C: '7 . . 12 . . . 7% . . 12 . . 7 . .', D: '7 . . 12 . . . 7 . . 12 . . 7 . 12' }, mix: { volume: -16 } },
+      { type: 'bass', pos: [-6, 2], params: { wave: 'square', cutoff: 180, envAmount: 2, decay: 0.12, res: 3, gate: 0.5 }, p: { C: '. 0 0 . . 0 0 . . 0 0 . . 0 12 .', D: '. 0 0 . . 0 0 . . 0 0 . . 0 12 .' }, mix: { volume: -9, sidechain: 0.45 } },
+      { type: 'stab', pos: [-4, -8], params: { chord: 'minor7', cutoff: 1800, decay: 0.12, wave: 'square' }, p: { C: '. . 0 . . 0 . . . . 0 . . 0 . .', D: '. . 0 . . 0 . . . . 0 . . 0 . .' }, mix: { volume: -15, delay: 0.3, sidechain: 0.4 } },
+    ],
+  },
+  {
+    id: 'bounce',
+    name: 'Bounce',
+    style: 'bounce',
+    bpm: 140,
+    key: 9,
+    scale: 'minor',
+    song: 'AABBCCDC',
+    description: 'Offbeat-Bass mit Oktavsprüngen – rollt und hüpft.',
+    master: { reverbDecay: 3.5, delayTime: '8n.', delayFeedback: 0.35 },
+    tracks: [
+      { type: 'kick', pos: [0, 1], params: { tune: 50, decay: 0.28, drive: 0.3, click: 0.35 }, p: { A: K4, B: K4, C: K4, D: 'x...x...x...x.x.' }, mix: { volume: -3 } },
+      { type: 'bass', name: 'Bounce Bass', pos: [-6, 2], params: { wave: 'sawtooth', cutoff: 260, res: 4, envAmount: 2.8, decay: 0.1, gate: 0.45 }, p: { B: '. . 0 . . . 0 . . . 0 . . . 0 .', C: '. . 0 12 . . 0 12 . . 0 12 . . 0 7', D: '. 0 12 . . 0 12 . . 0 12 . . 0 12 0' }, mix: { volume: -8, sidechain: 0.5 } },
+      { type: 'hat', pos: [4, -3], params: { decay: 0.03, tone: 10000 }, p: { A: 'gxgxgxgxgxgxgxgx', B: 'gxgxgxgxgxgxgxgx', C: 'gxoxgxoxgxoxgxox', D: 'gxoxgxoxgxoxgxox' }, mix: { volume: -15 } },
+      { type: 'openhat', pos: [6, 1], params: { decay: 0.18, tone: 8000 }, p: { A: OFF, B: OFF, C: OFF, D: OFF }, mix: { volume: -14 } },
+      { type: 'clap', pos: [-3, -2], p: { B: '....x.......x...', C: '....x.......x...', D: '....x.......x..x' }, mix: { volume: -10, reverb: 0.3 } },
+      { type: 'stab', pos: [-5, -6], params: { chord: 'minor', cutoff: 2200, decay: 0.1, detune: 18 }, p: { C: '. . . . . . 0 . . . . . . . 0 .', D: '. . 0 . . . . . . . 0 . . . 0 .' }, mix: { volume: -15, delay: 0.35, sidechain: 0.35 } },
+      { type: 'perc', name: 'Blip', pos: [5, -6], params: { decay: 0.05, octaves: 0.3, pitchDecay: 0.005, wave: 'square', octave: 4 }, p: { C: '. 12 . . . 19 . . . 12 . . . 7% . .', D: '. 12 . . . 19 . . . 12 . . . 7 . .' }, mix: { volume: -18, delay: 0.25 } },
+      { type: 'fm', name: 'Lead', pos: [3, -9], params: { harmonicity: 2, modIndex: 8, decay: 0.15, octave: 4, gate: 0.8 }, p: { D: '0 . . 7 . . 12 . . 10 . . 7 . . .' }, mix: { volume: -17, delay: 0.35, reverb: 0.3, sidechain: 0.3 } },
+      { type: 'fx', pos: [8, -5], params: { mode: 'riser', length: 16 }, p: { D: 'x...............' }, mix: { volume: -18, reverb: 0.4 } },
+    ],
+  },
+  {
     id: 'peak',
+    style: 'classic',
     name: 'Peak-Time Techno',
     bpm: 132,
     key: 9,
@@ -83,6 +124,7 @@ export const GENRES: GenrePreset[] = [
   },
   {
     id: 'acid',
+    style: 'classic',
     name: 'Acid Techno',
     bpm: 136,
     key: 4,
@@ -105,6 +147,7 @@ export const GENRES: GenrePreset[] = [
   },
   {
     id: 'minimal',
+    style: 'classic',
     name: 'Minimal / Microhouse',
     bpm: 124,
     swing: 0.25,
@@ -123,6 +166,7 @@ export const GENRES: GenrePreset[] = [
   },
   {
     id: 'hard',
+    style: 'classic',
     name: 'Hard Techno',
     bpm: 150,
     key: 5,
@@ -141,6 +185,7 @@ export const GENRES: GenrePreset[] = [
   },
   {
     id: 'melodic',
+    style: 'classic',
     name: 'Melodic Techno',
     bpm: 122,
     key: 0,
@@ -160,6 +205,7 @@ export const GENRES: GenrePreset[] = [
   },
   {
     id: 'dub',
+    style: 'berlin',
     name: 'Dub Techno',
     bpm: 118,
     swing: 0.1,
@@ -179,6 +225,7 @@ export const GENRES: GenrePreset[] = [
   },
   {
     id: 'industrial',
+    style: 'berlin',
     name: 'Industrial',
     bpm: 140,
     key: 1,
@@ -196,6 +243,7 @@ export const GENRES: GenrePreset[] = [
   },
   {
     id: 'detroit',
+    style: 'classic',
     name: 'Detroit Techno',
     bpm: 128,
     swing: 0.12,
@@ -219,13 +267,14 @@ export function buildPreset(g: GenrePreset): Project {
   const proj = emptyProject();
   proj.name = g.name;
   proj.bpm = g.bpm;
-  proj.swing = g.swing ?? 0;
+  proj.style = g.style;
   proj.key = g.key;
   proj.scale = g.scale;
   proj.master = { ...proj.master, ...g.master };
   const letters = 'ABCDEFGH';
   for (const pt of g.tracks) {
-    const t = createTrack(pt.type, { pos: { x: pt.pos[0], z: pt.pos[1] }, ...pt.mix });
+    const swing = pt.type === 'kick' ? 0 : (g.swing ?? STYLES[g.style].swing[pt.type] ?? 0);
+    const t = createTrack(pt.type, { pos: { x: pt.pos[0], z: pt.pos[1] }, swing, ...pt.mix });
     if (pt.name) t.name = pt.name;
     Object.assign(t.params, pt.params);
     proj.tracks.push(t);
@@ -237,26 +286,7 @@ export function buildPreset(g: GenrePreset): Project {
     }
   }
   proj.song = g.song.split('').map((c) => letters.indexOf(c)).filter((i) => i >= 0);
+  proj.songFilter = proj.song.map(() => 1);
   return proj;
 }
 
-export function randomDrumSteps(type: InstrumentType): Step[] {
-  const dens: Partial<Record<InstrumentType, number>> = { kick: 0.25, snare: 0.12, clap: 0.12, hat: 0.6, openhat: 0.2, perc: 0.25, fx: 0.05 };
-  const d = dens[type] ?? 0.3;
-  return Array.from({ length: STEPS }, (_, i) => {
-    let on = Math.random() < d;
-    if (type === 'kick') on = i % 4 === 0 || Math.random() < 0.06;
-    if (type === 'clap' || type === 'snare') on = i === 4 || i === 12 || Math.random() < 0.05;
-    if (type === 'openhat') on = i % 4 === 2 || Math.random() < 0.05;
-    return { on, vel: Math.random() < 0.3 ? 0.6 : 1, note: 0, accent: false, slide: false };
-  });
-}
-
-export function randomMelodicSteps(scaleSteps: number[], density = 0.45): Step[] {
-  const pool = [...scaleSteps, ...scaleSteps.map((s) => s + 12), 24];
-  return Array.from({ length: STEPS }, () => {
-    const on = Math.random() < density;
-    const note = Math.random() < 0.35 ? 0 : pool[Math.floor(Math.random() * pool.length)];
-    return { on, vel: Math.random() < 0.25 ? 0.6 : 1, note, accent: Math.random() < 0.2, slide: Math.random() < 0.15 };
-  });
-}

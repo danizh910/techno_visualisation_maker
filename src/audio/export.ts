@@ -3,21 +3,51 @@ import type { Project } from '../types';
 import { STEPS } from '../types';
 import { Engine } from './engine';
 
+export interface RenderEvent {
+  time: number;
+  id: string;
+  vel: number;
+  note: number;
+}
+export interface RenderResult {
+  buffer: AudioBuffer;
+  events: RenderEvent[];
+  steps: { time: number; step: number; bar: number }[];
+}
+
+/** Seedbarer Zufall (mulberry32), damit Audio und Video dieselben Wahrscheinlichkeits-Steps haben */
+export function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /**
- * Rendert den Song (oder ein Pattern mehrfach) offline und liefert eine WAV-Datei.
- * Es wird eine komplett eigene Engine im Offline-Kontext aufgebaut.
+ * Rendert eine Takt-Folge offline. Es wird eine komplett eigene Engine im Offline-Kontext aufgebaut.
+ * `filters` = Master-Filter pro Takt (wie project.songFilter), optional.
  */
-export async function renderToWav(project: Project, sequence: number[]): Promise<Blob> {
+export async function renderAudio(project: Project, sequence: number[], filters?: number[], seed = 1): Promise<RenderResult> {
   const snapshot: Project = JSON.parse(JSON.stringify(project));
   const stepDur = 60 / snapshot.bpm / 4;
   const seconds = sequence.length * STEPS * stepDur + Math.max(2, snapshot.master.reverbDecay);
+  const events: RenderEvent[] = [];
+  const steps: RenderResult['steps'] = [];
 
   const buffer = await Tone.Offline(async (ctx) => {
     const engine = new Engine({
       getProject: () => snapshot,
       transport: ctx.transport,
       live: false,
+      rng: seeded(seed),
       patternForBar: (bar) => (bar < sequence.length ? sequence[bar] : null),
+      filterForBar: (bar) => (filters && bar < filters.length ? [filters[bar], filters[bar + 1] ?? filters[bar]] : [1, 1]),
+      onTrigger: (id, vel, note, time) => events.push({ id, vel, note, time }),
+      onStep: (step, bar, time) => steps.push({ step, bar, time }),
     });
     await engine.ready();
     engine.start(0);
@@ -25,7 +55,12 @@ export async function renderToWav(project: Project, sequence: number[]): Promise
 
   const audio = buffer.get();
   if (!audio) throw new Error('Rendering fehlgeschlagen');
-  return encodeWav(audio);
+  events.sort((a, b) => a.time - b.time);
+  return { buffer: audio, events, steps };
+}
+
+export async function renderToWav(project: Project, sequence: number[], filters?: number[]): Promise<Blob> {
+  return encodeWav((await renderAudio(project, sequence, filters)).buffer);
 }
 
 function encodeWav(buf: AudioBuffer): Blob {

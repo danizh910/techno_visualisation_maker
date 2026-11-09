@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "mediabunny": "1.62.1",
     "three": "^0.187.0",
     "tone": "^15.1.22"
   },

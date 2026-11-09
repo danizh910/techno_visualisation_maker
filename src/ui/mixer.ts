@@ -41,6 +41,9 @@ export function mountMixer(root: HTMLElement) {
         }),
         slider({ label: 'Hall', min: 0, max: 1, step: 0.01, value: t.reverb, onInput: (v) => store.updateTrack(t.id, { reverb: v }) }),
         slider({ label: 'Delay', min: 0, max: 1, step: 0.01, value: t.delay, onInput: (v) => store.updateTrack(t.id, { delay: v }) }),
+        t.type === 'kick'
+          ? h('div', { class: 'slider-spacer' })
+          : slider({ label: 'Duck', min: 0, max: 1, step: 0.01, value: t.sidechain, title: 'Sidechain: duckt unter die Kick', onInput: (v) => store.updateTrack(t.id, { sidechain: v }) }),
         vfader(t.volume, -40, 6, 0.5, (v) => store.updateTrack(t.id, { volume: v })),
         h('div', { class: 'strip-ms' },
           h('button', { class: 'tog' + (t.mute ? ' on mute' : ''), onclick: () => store.updateTrack(t.id, { mute: !t.mute }) }, 'M'),

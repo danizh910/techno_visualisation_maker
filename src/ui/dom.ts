@@ -29,6 +29,25 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
+const ICONS: Record<string, string> = {
+  dice: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/>',
+  mutate: '<path d="M3 12c2.5-6 5.5-6 9 0s6.5 6 9 0"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  unlock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>',
+  clear: '<path d="M6 6l12 12M18 6L6 18"/>',
+  play: '<path d="M7 5l12 7-12 7z" fill="currentColor" stroke="none"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" fill="currentColor" stroke="none"/>',
+  song: '<path d="M3 6h5v12H3zM10 9h5v9h-5zM17 4h4v14h-4z"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/>',
+};
+
+/** schlichtes Linien-Icon */
+export function icon(name: keyof typeof ICONS | string): HTMLElement {
+  const s = h('span', { class: 'ico', 'aria-hidden': 'true' });
+  s.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] ?? ''}</svg>`;
+  return s;
+}
+
 export function clear(el: HTMLElement) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
