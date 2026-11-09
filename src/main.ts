@@ -249,6 +249,7 @@ function renderTopbar() {
       }, 'Speichern'),
       h('button', { class: 'btn small ghost', title: 'Projektdatei laden', onclick: () => fileInput.click() }, 'Laden'),
       h('button', { class: 'btn small', title: 'Als WAV exportieren', onclick: exportWav }, 'WAV'),
+      h('button', { class: 'btn small', title: 'Track + 3D-Show als Video exportieren', onclick: videoDialog }, 'Video'),
       fileInput,
     ),
   );
@@ -317,6 +318,7 @@ function renderOverlay() {
       h('button', { class: 'chip' + (scene.bloom ? ' on' : ''), title: 'Dezenter Glow (kostet Leistung)', onclick: () => { scene.bloom = !scene.bloom; renderOverlay(); } }, 'Glow'),
       h('button', { class: 'chip' + (scene.autoRotate ? ' on' : ''), title: 'Langsame Kamerafahrt', onclick: () => { scene.autoRotate = !scene.autoRotate; renderOverlay(); } }, 'Kamerafahrt'),
       h('button', { class: 'chip', title: 'Kamera zurücksetzen', onclick: () => scene.resetCamera() }, 'Kamera zurück'),
+      h('button', { class: 'chip', title: 'Vollbild-Show ohne Oberfläche (Taste V)', onclick: () => setVJ(true) }, 'Show'),
       h('button', { class: 'chip icon-chip', title: 'Tipps anzeigen', onclick: () => showTips(true) }, icon('help')),
     ),
     h('div', { class: 'ov-hint' }, 'Objekt ziehen = im Raum mischen · Klick = Sound · Ziehen im Leeren = Kamera · Mausrad = Zoom'),
@@ -341,7 +343,7 @@ function renderTabs() {
     tabsNav.append(h('button', { class: 'tab' + (t.id === activeTab ? ' on' : ''), onclick: () => { activeTab = t.id; renderTabs(); } }, t.label));
     panes[t.id].classList.toggle('on', t.id === activeTab);
   }
-  tabsNav.append(h('div', { class: 'spacer' }), h('span', { class: 'kbd-hint' }, 'Leertaste Play · 1–8 Pattern · R Würfeln · M Mutieren · N Szene · A–K Tastatur'));
+  tabsNav.append(h('div', { class: 'spacer' }), h('span', { class: 'kbd-hint' }, 'Leertaste Play · 1–8 Pattern · R Würfeln · M Mutieren · N Szene · V Show · A–K Tastatur'));
 }
 
 function loopToTrack() {
@@ -400,6 +402,102 @@ async function exportWav() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  VJ-/Vollbildmodus                                                  */
+/* ------------------------------------------------------------------ */
+
+let vj = false;
+let vjHintTimer: number | undefined;
+
+function setVJ(on: boolean) {
+  if (vj === on) return;
+  vj = on;
+  document.body.classList.toggle('vj', on);
+  scene.autoCam = on;
+  stage.querySelector('.vj-hint')?.remove();
+  if (on) {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+    const hint = h('div', { class: 'vj-hint' }, 'Leertaste Play · N Szene · C Kamera · V / Esc beenden');
+    stage.append(hint);
+    clearTimeout(vjHintTimer);
+    vjHintTimer = window.setTimeout(() => hint.classList.add('gone'), 3500);
+  } else if (document.fullscreenElement) {
+    void document.exitFullscreen().catch(() => {});
+  }
+}
+// Esc im Browser-Vollbild beendet auch die Show
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && vj) setVJ(false);
+});
+
+/* ------------------------------------------------------------------ */
+/*  Video-Export                                                       */
+/* ------------------------------------------------------------------ */
+
+function videoDialog() {
+  if (typeof VideoEncoder === 'undefined') {
+    alert('Dein Browser kann keine Videos kodieren (WebCodecs fehlt). Bitte ein aktuelles Chrome oder Edge verwenden.');
+    return;
+  }
+  if (store.playing) stop();
+  const p = store.project;
+  const song = store.mode === 'song';
+  const seq = song ? p.song : [store.currentPattern, store.currentPattern, store.currentPattern, store.currentPattern];
+  const secs = Math.round((seq.length * 16 * 60) / p.bpm / 4);
+  const res = h('select', {}, h('option', { value: '1280x720' }, '720p (1280×720)'), h('option', { value: '1920x1080' }, '1080p (1920×1080)'));
+  const fps = h('select', {}, h('option', { value: '30' }, '30 fps'), h('option', { value: '60' }, '60 fps'));
+  const card = h('div', { class: 'modal-card wide' });
+  const modal = h('div', { class: 'modal' }, card);
+  const signal = { cancelled: false };
+  const sceneLabel = SCENES.find((s) => s.id === p.scene)?.label ?? '';
+
+  async function run() {
+    const [w, hgt] = res.value.split('x').map(Number);
+    const bar = h('span', {});
+    const text = h('p', {}, 'Starte …');
+    clear(card);
+    card.append(
+      h('h2', {}, 'Rendere Video …'),
+      text,
+      h('div', { class: 'progress' }, bar),
+      h('div', { class: 'row-btns center' },
+        h('button', { class: 'btn small ghost', onclick: () => { signal.cancelled = true; text.textContent = 'Breche ab …'; } }, 'Abbrechen'),
+      ),
+    );
+    try {
+      const { exportVideo } = await import('./video');
+      const out = await exportVideo({
+        project: p, sequence: seq, filters: song ? p.songFilter : undefined, scene, width: w, height: hgt, fps: Number(fps.value), signal,
+        onProgress: (phase, frac) => {
+          text.textContent = phase;
+          bar.style.width = `${Math.round(frac * 100)}%`;
+        },
+      });
+      downloadBlob(out.blob, `${safeName(p.name)}.${out.ext}`);
+    } catch (e) {
+      if (!signal.cancelled) {
+        console.error(e);
+        alert(`Video-Export fehlgeschlagen: ${(e as Error).message}\n\nTipp: aktuelles Chrome verwenden.`);
+      }
+    } finally {
+      modal.remove();
+    }
+  }
+
+  card.append(
+    h('h2', {}, 'Video exportieren'),
+    h('p', {}, `${song ? `Song, ${seq.length} Takte` : `Loop ${PATTERN_NAMES[store.currentPattern]} × 4`} · ca. ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} · Szene „${sceneLabel}“ mit Kamerafahrten`),
+    h('p', { class: 'small' }, 'Jedes Bild wird einzeln gerendert – das dauert länger als der Track, ruckelt dafür nie. MP4, wenn der Browser es kann, sonst WebM.'),
+    h('div', { class: 'form-row' }, h('label', { class: 'mini' }, 'Auflösung', res), h('label', { class: 'mini' }, 'Bildrate', fps)),
+    h('div', { class: 'row-btns center' },
+      h('button', { class: 'btn small ghost', onclick: () => modal.remove() }, 'Abbrechen'),
+      h('button', { class: 'btn small accent', onclick: run }, 'Rendern'),
+    ),
+  );
+  document.body.append(modal);
+}
+
+
+/* ------------------------------------------------------------------ */
 /*  Tastatur                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -422,13 +520,19 @@ window.addEventListener('keydown', (e) => {
     rollTracks('dice');
   } else if (e.code === 'KeyM' && !e.repeat) {
     rollTracks('mutate');
+  } else if (e.code === 'KeyV' && !e.repeat) {
+    setVJ(!vj);
+  } else if (e.code === 'KeyC' && !e.repeat && vj) {
+    scene.nextShot();
+  } else if (e.code === 'Escape' && vj) {
+    setVJ(false);
   } else if (e.code === 'KeyN' && !e.repeat) {
     const i = SCENES.findIndex((s) => s.id === store.project.scene);
     setScene(SCENES[(i + 1) % SCENES.length].id);
   } else if (e.code === 'Enter' && store.selectedTrackId && tag !== 'BUTTON') {
     e.preventDefault();
     preview(store.selectedTrackId);
-  } else if (e.code in PIANO && store.selectedTrackId && !e.repeat && !e.shiftKey) {
+  } else if (e.code in PIANO && store.selectedTrackId && !e.repeat && !e.shiftKey && !vj) {
     preview(store.selectedTrackId, PIANO[e.code]);
   }
 });
@@ -479,4 +583,4 @@ store.load(saved && saved.tracks.length ? saved : buildPreset(GENRES[0]));
 showTips();
 
 // für Tests / Debugging
-Object.assign(window, { __tvm: { store, engine, scene, Tone, groove: { generate, mutate, euclid, buildSong }, renderToWav, validateProject, GENRES, buildPreset, loadProject } });
+Object.assign(window, { __tvm: { store, engine, scene, Tone, groove: { generate, mutate, euclid, buildSong }, renderToWav, validateProject, GENRES, buildPreset, loadProject, setVJ, video: () => import('./video') } });

@@ -1,9 +1,10 @@
 # CLAUDE.md – Projektwissen für Claude Code
 
 ## Projekt
-TECHNO//VIZ: Browser-Tool zum Bauen von Techno-Tracks (alle Genres). Jede Spur ist ein leuchtendes
-3D-Objekt im Raum, das in Echtzeit zum Beat pulsiert, frei verschoben werden kann und dessen Position
-den Mix beeinflusst (Raum-Mix). Sprache der Oberfläche und Kommentare: **Deutsch**.
+TECHNO//VIZ: Browser-Groovebox für Berlin Techno, Hard Groove und Bounce, für Einsteiger. Jede Spur ist
+eine Skulptur im 3D-Raum (Szenen Halle/Linien/Studio, monochrom + eine Akzentfarbe), Position = Raum-Mix.
+Live: https://techno-visualisation-maker.vercel.app (Vercel, Git-Deploy von `main`).
+Sprache der Oberfläche und Kommentare: **Deutsch**.
 
 ## Befehle
 - `npm install` – Abhängigkeiten
@@ -18,14 +19,16 @@ Tone.js 15 (Audio), three.js 0.187 (3D, UnrealBloom). Node ≥ 20.19 nötig.
 
 ## Architektur
 ```
-src/types.ts              Datenmodell: Project, Track, Pattern, Step (16 Steps)
-src/store.ts              Globaler Zustand + Event-Bus (store.on/emit) + Autosave (localStorage)
+src/types.ts              Datenmodell v2: Project, Track (swing, sidechain, locked, macros, euclid), Step (prob)
+src/store.ts              Zustand + Event-Bus + Autosave, validateProject (Migration v1→v2), Sound-Bibliothek
 src/music.ts              Tonleitern, Notennamen, rootMidi(key, octave)
-src/presets.ts            8 Genre-Presets, Pattern-Kurzschreibweise drum()/mel(), Zufalls-Patterns
-src/audio/instruments.ts  INSTRUMENTS (Parameter-Schemas = Sound-Design-Maske) + Voice-Klassen
+src/groove.ts             Notation drum()/mel(), STYLES-Regeln, generate/mutate/euclid, buildSong (Loop → Track)
+src/presets.ts            Genre-Presets (Berlin Rumble, Hard Groove, Bounce vorne)
+src/audio/instruments.ts  INSTRUMENTS (Schemas, `macro`-Tags), applyMacros, randomSound, Voice-Klassen
 src/audio/engine.ts       Engine: Spur-Kanäle, Mixer, Hall/Delay-Busse, Master, Sequencer-Tick, Raum-Mix
-src/audio/export.ts       WAV-Export: eigene Engine in Tone.Offline, 16-bit-WAV-Encoder
-src/viz/scene.ts          Scene3D: Objekte pro Spur, Step-Ring, Spektrum, Laser, Drag&Drop, Auswahl
+src/audio/export.ts       renderAudio (Tone.Offline, geseedeter Zufall, Event-Protokoll), WAV-Encoder
+src/video.ts              Video-Export: Frames mit fester Zeit → Mediabunny (MP4, Fallback WebM)
+src/viz/scene.ts          Scene3D: LOOKS, Rollen pro Instrument, Auto-Kamera (autoCam), step(dt,t) öffentlich
 src/ui/*.ts               sequencer, pianoRoll, mixer, soundEditor, arrangement
 src/main.ts               Verdrahtung: Layout, Topbar, Tabs, Tastatur, Start-Bildschirm, Export
 ```
@@ -44,13 +47,18 @@ src/main.ts               Verdrahtung: Layout, Topbar, Tabs, Tastatur, Start-Bil
   Visuelles immer über `Tone.getDraw().schedule(cb, time)`.
 - Melodische Steps: `note` = Halbtöne (0..24) über Grundton `rootMidi(project.key, params.octave)`.
 - Acid: `slide` am vorherigen Step → `setNote` mit Portamento statt neuem Anschlag.
+- Makros: Experten-Werte (`track.params`) bleiben unverändert, `applyMacros` rechnet beim Setzen der Voice drauf.
+- Swing/Sidechain/Chance laufen im Engine-Tick (Transport-Swing ist 0). Song-Edits über `store.setSong`,
+  damit `songFilter` gleich lang bleibt.
+- Lokal ist Node 20.11 zu alt für Vite 8 → portable Node 22 nutzen.
+- Tests: `python scripts/smoke_test.py URL`, `python scripts/video_test.py URL` (braucht installiertes Chrome).
 
 ### Neues Instrument hinzufügen
 1. `InstrumentType` in `src/types.ts` erweitern.
 2. Eintrag in `INSTRUMENTS` + `INSTRUMENT_ORDER` (`src/audio/instruments.ts`) mit Parametern.
 3. Voice-Klasse (implements `Voice`: `output`, `set`, `trigger`, `dispose`) + Fall in `createVoice`.
-4. Geometrie in `geometryFor()` (`src/viz/scene.ts`).
-5. Optional Dichte in `randomDrumSteps` (`src/presets.ts`).
+4. Geometrie in `geometryFor()` und Rolle in `ROLE` (`src/viz/scene.ts`).
+5. Regeln in `STYLES[...].rules` (`src/groove.ts`), mindestens unter `classic`.
 
 ## Konventionen
 - Strikte Typen, keine ungenutzten Variablen (tsc bricht sonst ab).
